@@ -226,6 +226,15 @@ Nút **Xóa tất cả khuôn mặt** và lệnh `CLEAR_FACES` chỉ dùng khi m
 
 Khi nạp lại, giữ **Erase All Flash Before Sketch Upload = Disabled** để bảo toàn NVS. Xóa toàn bộ flash sẽ xóa khuôn mặt đã lưu.
 
+### Đăng ký khuôn mặt offline qua DevKit
+
+1. Nạp firmware hỗ trợ `ENROLL` cho cả hai bo. Giữ ESP32-CAM dùng nguồn ngoài và cắm **DevKit** vào laptop. Nối DevKit **D33 → CAM IO14**, **CAM IO15 → DevKit D25** và **GND ↔ GND**.
+2. Mở Serial Monitor của **DevKit**, chọn **115200 baud** và **New Line**. Chờ `CAMERA UART: connected`. Hotspot và Flask có thể tắt trong lúc đăng ký.
+3. Cho một người nhìn thẳng vào camera và gửi `ENROLL` một lần. Theo dõi `ENROLL Sample=…/5`. Khi hoàn tất, DevKit báo `ENROLL SAVED | Face ID=… | saved on ESP32-CAM`. Mẫu nằm trong flash của camera. Nếu báo `ENROLL DUPLICATE`, ghi lại Face ID đã có.
+4. Khi muốn đưa người này vào danh sách, mở dashboard → **Liên kết Face ID có sẵn**, nhập họ tên, MSSV, camera `CAM01` và Face ID ghi được.
+
+Nếu chỉ có `ENROLL request sent` rồi báo `ENROLL timeout: no reply`, kiểm tra nguồn camera, hai dây UART và firmware của cả hai bo. Lượt đăng ký đang chạy sẽ chặn nút điểm danh cho đến khi có kết quả.
+
 ## 2. ESP32-DevKit
 
 Sau khi camera chạy riêng đạt yêu cầu, mở `firmware/esp32_devkit/SmartClassroomController/SmartClassroomController.ino`.
@@ -387,7 +396,7 @@ Trình diễn theo thứ tự:
 
 1. Chỉ các hàm `face_detect()`, `align_face()`, `get_face_id()`, `findClosestFace()` và `recognizeLiveFace()` trong `face_engine.cpp`.
 2. Đăng ký bằng trang camera. Sau đó bấm **Tắt Wi-Fi camera**, gửi `TEST` qua USB và xem Face ID để kiểm chứng phép nhận diện độc lập với mạng. `TEST` chỉ phục vụ chẩn đoán.
-3. Để trình diễn thử thách qua UART khi backend đã tắt, mở Serial Monitor của ESP32-CAM ở 115200 baud, bấm nút DevKit và làm theo hướng ở dòng `LIVENESS`. Camera gửi Face ID qua UART nếu vượt qua thử thách.
+3. Để trình diễn thử thách khi hotspot hoặc backend đã tắt, mở Serial Monitor của **DevKit** ở 115200 baud, bấm nút DevKit và làm theo các bước `1/3`, `2/3`, `3/3`. Màn hình Serial gợi ý khoảng cách, vị trí, ánh sáng và báo nếu xoay ngược hướng. Camera gửi Face ID qua UART khi nhận diện thành công.
 4. Bật backend, mở buổi học, xem message MQTT chỉ có ID/trạng thái và bản ghi trên web.
 
 Thử thách chuyển động là lớp chống ảnh tĩnh cơ bản. Xem [cách thử với ảnh tĩnh và người thật](TESTING.md#6-thử-từ-chối-và-đo-độ-ổn-định-của-ai).

@@ -142,7 +142,7 @@ Network của trình duyệt chỉ quan sát các yêu cầu của trang. Dùng 
 1. Sau khi đăng ký một người, mở Serial Monitor của **ESP32-CAM** ở 115200 baud và chọn **New Line**. Gửi `STATUS` để xác nhận `camera=ready` và `face_count` lớn hơn 0. Thử `TEST` một lần với người đã đăng ký.
 2. Gửi `WIFI_OFF`, rồi gửi `STATUS` để hiện `setup_WiFi=OFF`. Cho người đã đăng ký đứng trước camera và gửi `TEST`. Tìm `LOCAL TEST status=recognized face_id=… | inference=ESP32-CAM`. Đưa mặt ra khỏi khung và gửi `TEST` lần nữa. Kỳ vọng `no_face` để đối chiếu với lượt có mặt. Gửi `RESTART` hoặc bấm RST để camera vào hotspot lại.
 3. Mở `face_engine.cpp` và chỉ các bước `face_detect()`, `align_face()`, `get_face_id()` và `findClosestFace()`. Log và mã nguồn cho thấy firmware camera chạy từ khung hình đến Face ID.
-4. Nối UART với DevKit: bấm nút và quan sát kết quả / servo ngay cả khi tắt chương trình Flask. Điều này chứng minh phản hồi nhận diện cục bộ; chưa chứng minh dữ liệu đã được lưu tại backend.
+4. Nối UART với DevKit và tắt hotspot hoặc Flask. Mở Serial Monitor của DevKit ở 115200 baud. Bấm nút một lần và làm theo `1/3 NHIN THANG`, `2/3 XOAY NHE` và `3/3 NHIN THANG LAI`. Kiểm tra `CAMERA: recognized` và servo quay. Thử thêm một lượt giữ mặt bất động sau khi vào bước 2 để xác nhận `CAMERA: liveness_failed` và cửa giữ nguyên trạng thái.
 5. Chạy backend, mở buổi học, xem message `/attendance` và dòng sinh viên trên web. Message chỉ chứa ID/trạng thái; không có ảnh.
 
 Thời gian nhận diện và sai số phụ thuộc ánh sáng, góc mặt và giới hạn ESP32 đời đầu. Đo ít nhất 10 lần cho mỗi người, thêm người chưa đăng ký và ghi lại thời gian / số lần đúng. Nêu rõ loại ảnh đã thử khi báo cáo hiệu quả chống giả mạo.

@@ -1,7 +1,7 @@
 /* Smart Classroom: ESP32-CAM AI-Thinker, Arduino ESP32 core 2.0.0.
    Board: AI Thinker ESP32-CAM, Huge APP (3MB No OTA).
-   Button: CAM GPIO13 to GND. UART: CAM RX14 <- DevKit TX17,
-   CAM TX15 -> DevKit RX16, common GND. See camera_config.h for legacy wiring.
+   Button: CAM GPIO13 to GND. UART: CAM RX14 <- DevKit TX33,
+   CAM TX15 -> DevKit RX25, common GND. See camera_config.h for legacy wiring.
    Wi-Fi: joins the laptop's 2.4 GHz Mobile Hotspot. Inference stays on chip.
    USB Serial commands (115200, newline): STATUS, ENROLL, TEST, CLEAR_FACES.
 
@@ -22,6 +22,8 @@ const char *password = "";
 
 HardwareSerial controller(1);
 static String uartLine, usbLine;
+static const char *uartEnrollmentId = nullptr;
+static int uartEnrollmentSamples = 0;
 static bool cameraReady = false, overflowUART = false, overflowUSB = false;
 static unsigned long lastPreview=0;
 static portMUX_TYPE buttonMux = portMUX_INITIALIZER_UNLOCKED;
@@ -77,6 +79,16 @@ static bool readButtonCommand(const String &line, String &id, bool &local) {
   return true;
 }
 
+static bool readEnrollmentCommand(const String &line, String &id) {
+  if (!line.startsWith("ENROLL:")) return false;
+  id = line.substring(7);
+  return id.length() < sizeof(FaceEngineStatus::enrollment_token) && validRequest(id);
+}
+
+static void replyEnrollment(const char *id, const char *status, int number) {
+  controller.printf("ENROLL:%s:%s:%d\n", id, status, number);
+}
+
 static void reply(const String &requestId, const char *status, int faceId=-1) {
   controller.printf("RESULT:%s:%s:%d\n", requestId.c_str(), status, faceId);
   Serial.printf("RESULT request=%s status=%s face_id=%d | inference=ESP32-CAM\n", requestId.c_str(), status, faceId);
@@ -84,11 +96,16 @@ static void reply(const String &requestId, const char *status, int faceId=-1) {
 
 static void replyBusy();
 
-static const char *captureCheckin(const char *id, int &faceId) {
+static void sendCheckinGuide(const char *id, const char *step, const char *hint, float score) {
+  controller.printf("CHECKIN_GUIDE:%s:%s:%s:%.3f\n", id, step, hint, score);
+}
+
+static const char *captureCheckin(const char *id, int &faceId, CheckinFeedback feedback) {
   cameraWebBeginCheckinFrame(id);
-  const char *status = cameraReady ? recognizeLiveFace(faceId, id, replyBusy) : "error";
+  const char *status = cameraReady ? recognizeLiveFace(faceId, id, replyBusy, feedback) : "error";
   const FaceEngineStatus result = faceEngineStatus();
   cameraWebFinishCheckinFrame(id, status, result.frame_light, result.match_score);
+  if (feedback) feedback(id, "result", status, cameraReady ? result.match_score : NAN);
   return status;
 }
 
@@ -101,7 +118,7 @@ static void handleDirectButton(bool busy) {
   const char *status = "busy";
   if (!busy) {
     digitalWrite(33, LOW);
-    status = captureCheckin(id, faceId);
+    status = captureCheckin(id, faceId, nullptr);
     digitalWrite(33, HIGH);
   }
   cameraAttendanceResult(id, session, status, faceId);
@@ -124,6 +141,13 @@ static bool readLine(Stream &stream, String &buffer, bool &overflow, String &lin
 static void replyBusy() {
   cameraWebPollNetwork();
   handleDirectButton(true);
+  if (uartEnrollmentId) {
+    const int samples = faceEngineStatus().samples;
+    if (samples != uartEnrollmentSamples) {
+      uartEnrollmentSamples = samples;
+      replyEnrollment(uartEnrollmentId, "progress", samples);
+    }
+  }
   String command;
   while (readLine(controller, uartLine, overflowUART, command)) {
     String id;
@@ -132,6 +156,8 @@ static void replyBusy() {
       cameraWebNoteButton(id.c_str(), "busy");
       if (local) cameraAttendanceResult(id.c_str(), cameraAttendanceSession(), "busy", -1);
       reply(id, "busy");
+    } else if (readEnrollmentCommand(command, id)) {
+      replyEnrollment(id.c_str(), "busy", -1);
     }
   }
   CameraCommand action;
@@ -142,6 +168,27 @@ static void replyBusy() {
     // A command may have been queued just before enrollment started.
     // Ignore it while enrollment owns the camera; never reenter inference.
   }
+}
+
+static void enrollFromController(const String &id) {
+  if (!cameraReady) {
+    replyEnrollment(id.c_str(), "camera_error", -1);
+    return;
+  }
+  uartEnrollmentSamples = 0;
+  uartEnrollmentId = id.c_str();
+  replyEnrollment(uartEnrollmentId, "started", 0);
+  Serial.println(enrollOneFace(replyBusy, uartEnrollmentId));
+  uartEnrollmentId = nullptr;
+
+  const FaceEngineStatus result = faceEngineStatus();
+  for (int slot = 0; slot < result.face_count; ++slot) {
+    if (!strcmp(result.enrolled_tokens[slot], id.c_str())) {
+      replyEnrollment(id.c_str(), "enrolled", slot);
+      return;
+    }
+  }
+  replyEnrollment(id.c_str(), result.enrollment_result, result.enrollment_face_id);
 }
 
 void setup() {
@@ -177,12 +224,15 @@ void loop() {
       controller.printf("CHECKIN_ACK:%s\n", id.c_str());
       int faceId = -1;
       digitalWrite(33, LOW);
-      const char *status = captureCheckin(id.c_str(), faceId);
+      const char *status = captureCheckin(id.c_str(), faceId, sendCheckinGuide);
       cameraWebNoteButton(id.c_str(), status);
       if (local) cameraAttendanceResult(id.c_str(), session, status, faceId);
       // Map the challenge rejection for controllers with the original UART protocol.
       reply(id, !strcmp(status, "liveness_failed") ? "unknown" : status, faceId);
       digitalWrite(33, HIGH);
+      break;
+    } else if (readEnrollmentCommand(command, id)) {
+      enrollFromController(id);
       break;
     }
   }
@@ -211,7 +261,7 @@ void loop() {
       if (cameraReady) Serial.println(enrollOneFace(replyBusy, enrollmentToken));
     } else if (action==CameraCommand::Checkin) {
       int faceId=-1;
-      const char *status=cameraWebCheckinFrameHeld() ? "busy" : captureCheckin(enrollmentToken, faceId);
+      const char *status=cameraWebCheckinFrameHeld() ? "busy" : captureCheckin(enrollmentToken, faceId, nullptr);
       cameraAttendanceResult(enrollmentToken, {}, status, faceId);
       Serial.printf("WEB CHECKIN request=%s status=%s face_id=%d\n",enrollmentToken,status,faceId);
     } else if (action==CameraCommand::Test) {

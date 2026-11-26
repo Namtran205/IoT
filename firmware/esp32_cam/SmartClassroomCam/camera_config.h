@@ -10,7 +10,9 @@
 #define CAM_PREVIEW_CLIENT_TIMEOUT_MS 6000UL
 #define CAM_PREVIEW_FRAME_RETENTION_MS 6000UL
 #define CAM_CHECKIN_FRAME_RETENTION_MS 15000UL
-constexpr unsigned long CAM_LIVENESS_TIMEOUT_MS = 18000UL;
+constexpr float CAM_CHECKIN_MATCH_THRESHOLD = 0.52f;
+constexpr unsigned long CAM_LIVENESS_TIMEOUT_MS = 25000UL;
+constexpr unsigned long CAM_LIVENESS_FACE_LOST_MS = 4500UL;
 
 // Set false for an existing installation with CAM IO13 wired to the DevKit UART RX.
 // With the direct button enabled, switch IO13 to GND and use IO15 for UART TX.

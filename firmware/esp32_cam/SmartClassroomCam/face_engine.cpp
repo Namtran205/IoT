@@ -86,7 +86,7 @@ struct FaceMatch {
   int id = -1;
   float score = NAN;
 
-  bool accepted() const { return id >= 0 && score > FACE_REC_THRESHOLD; }
+  bool accepted(float threshold = FACE_REC_THRESHOLD) const { return id >= 0 && score > threshold; }
 };
 
 static FaceMatch findClosestFace(const dl_matrix3d_t &face) {
@@ -203,9 +203,20 @@ struct Capture {
   camera_fb_t *snapshot = nullptr;
   const char *status = "error";
   const char *light = "waiting";
+  const char *framing = nullptr;
   float yaw = NAN;
   unsigned long started = millis();
 };
+
+static const char *faceFraming(const box_t &box, int width, int height) {
+  const float faceWidth = box.box_p[2] - box.box_p[0] + 1;
+  if (faceWidth < width * 0.22f) return "closer";
+  if (faceWidth > width * 0.70f) return "farther";
+  const float centerX = (box.box_p[0] + box.box_p[2]) * 0.5f / width;
+  const float centerY = (box.box_p[1] + box.box_p[3]) * 0.5f / height;
+  if (centerX < 0.25f || centerX > 0.75f || centerY < 0.24f || centerY > 0.76f) return "center_face";
+  return nullptr;
+}
 
 static const char *frameLighting(const dl_matrix3du_t *rgb, const box_array_t *boxes) {
   int left = rgb->w / 4, right = rgb->w * 3 / 4;
@@ -284,6 +295,7 @@ static Capture captureAligned(int retry=0, bool keepSnapshot=false, bool discard
     if (boxes->len > 1) capture.status = "multiple_faces";
     else if (boxes->len == 0) capture.status = "no_face";
     else {
+      capture.framing = faceFraming(boxes->box[0], capture.rgb->w, capture.rgb->h);
       if (boxes->landmark) capture.yaw = faceYaw(boxes->landmark[0].landmark_p);
       capture.aligned = dl_matrix3du_alloc(1, FACE_WIDTH, FACE_HEIGHT, 3);
       if (!capture.aligned) capture.status = "error";
@@ -411,7 +423,18 @@ const char *recognizeOneFace(int &faceId) {
   resultStatus(status,faceId); return status;
 }
 
-const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBusy)()) {
+static const char *checkinHint(const Capture &capture, const FaceLiveness &challenge, bool lowMatch) {
+  if (strcmp(capture.light, "ok")) return capture.light;
+  if (capture.framing) return capture.framing;
+  if (!strcmp(capture.status, "no_face")) return "no_face";
+  if (challenge.turnedOpposite(capture.yaw)) return "opposite";
+  if (lowMatch) return "low_match";
+  if (challenge.step() != FaceLiveness::Step::Turn && !challenge.needsMatch(capture.yaw)) return "straight";
+  if (!isfinite(capture.yaw) || (challenge.step() != FaceLiveness::Step::Turn && !capture.aligned)) return "straight";
+  return "hold";
+}
+
+const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBusy)(), CheckinFeedback feedback) {
   faceId = -1;
   state.match_score = NAN;
   if (!facesReady || !identities.count) {
@@ -427,6 +450,8 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
   resultStatus("recognizing");
   Serial.println("LIVENESS 1/3 | Look straight at the camera");
   const unsigned long started = millis();
+  unsigned long lastFeedback = started;
+  if (feedback) feedback(checkinId, state.liveness_step, "start", NAN);
   unsigned long lastSeen = started;
   const char *status = "no_face";
   int attempts = 0, retry = 0;
@@ -443,7 +468,7 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
     FaceMatch match;
     if (needsMatch) match = matchCapture(capture);
     if (isfinite(match.score)) state.match_score = match.score;
-    const bool faceLost = before != Step::Center && millis() - lastSeen > 2500UL;
+    const bool faceLost = before != Step::Center && millis() - lastSeen > CAM_LIVENESS_FACE_LOST_MS;
     const bool expired = millis() - started >= CAM_LIVENESS_TIMEOUT_MS;
     if (multipleFaces || frameError) {
       status = multipleFaces ? "multiple_faces" : "error";
@@ -454,7 +479,8 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
     }
 
     const bool fatal = multipleFaces || frameError || faceLost || expired;
-    if (!fatal) challenge.observe(capture.yaw, match.accepted() ? match.id : -1);
+    const bool matched = match.accepted(CAM_CHECKIN_MATCH_THRESHOLD);
+    if (!fatal) challenge.observe(capture.yaw, matched ? match.id : -1);
     const Step after = challenge.step();
     if (after == Step::Turn && before != after) {
       state.liveness_step = turnRight ? "turn_right" : "turn_left";
@@ -469,6 +495,12 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
       if (capture.snapshot)
         cameraWebStoreCheckinFrame(checkinId, capture.snapshot->buf, capture.snapshot->len);
     }
+    if (feedback && !fatal && after != Step::Passed && after != Step::WrongIdentity
+        && (after != before || millis() - lastFeedback >= 1400UL)) {
+      lastFeedback = millis();
+      feedback(checkinId, state.liveness_step,
+               after != before ? "start" : checkinHint(capture, challenge, needsMatch && !matched), match.score);
+    }
     const char *label = after == Step::Turn ? (turnRight ? "TURN RIGHT" : "TURN LEFT")
       : after == Step::Return ? "LOOK STRAIGHT AGAIN" : "LOOK STRAIGHT";
     finishCapture(capture, label);
@@ -479,7 +511,7 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
   state.liveness_step = nullptr;
   state.processing_ms = millis() - started;
   Serial.printf("CHECKIN DETECTION | frames=%d | total_ms=%lu | %s | similarity=%.3f | threshold=%.2f\n",
-                attempts, state.processing_ms, status, state.match_score, FACE_REC_THRESHOLD);
+                attempts, state.processing_ms, status, state.match_score, CAM_CHECKIN_MATCH_THRESHOLD);
   resultStatus(status, faceId);
   return status;
 }

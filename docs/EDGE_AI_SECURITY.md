@@ -30,11 +30,11 @@ SQLite `backend/instance/classroom.sqlite3` lưu MSSV, tên, ánh xạ `(camera_
 
 ### Khi chụp điểm danh
 
-ESP32-CAM chạy chuỗi chụp, dò mặt, căn chỉnh và trích vector. Với các vector đã chuẩn hóa L2, tích vô hướng tương ứng với cosine similarity. Camera so vector mới với các mẫu trong RAM và chọn Face ID có điểm cao nhất nếu điểm **lớn hơn 0,55**. Trước khi trả `recognized` cho lượt điểm danh, camera kiểm tra thử thách chuyển động đầu trên các khung liên tiếp.
+ESP32-CAM chạy chuỗi chụp, dò mặt, căn chỉnh và trích vector. Với các vector đã chuẩn hóa L2, tích vô hướng tương ứng với cosine similarity. Camera so vector mới với các mẫu trong RAM và chọn Face ID có điểm cao nhất nếu điểm **lớn hơn 0,52** khi điểm danh. Lệnh chẩn đoán `TEST` và kiểm tra mẫu đăng ký dùng **0,55**. Trước khi trả `recognized` cho lượt điểm danh, camera kiểm tra thử thách chuyển động đầu trên các khung liên tiếp.
 
 1. **Nhìn thẳng.** Camera xác định Face ID ban đầu và ghi lại vị trí tương đối của mũi so với mắt và khóe miệng.
-2. **Xoay nhẹ theo yêu cầu.** Camera chọn trái hoặc phải ngẫu nhiên và hướng dẫn trên web. Để qua bước này, vị trí tương đối của mũi phải chuyển theo hướng đó ở hai khung liên tiếp. Phép tính theo trục mắt giảm ảnh hưởng của dịch chuyển, thay đổi kích thước và nghiêng ảnh trong mặt phẳng.
-3. **Nhìn thẳng lại.** Camera so khớp lại và yêu cầu cùng Face ID ban đầu. Khung cuối được giữ để xem lại. Khi hết cửa sổ 18 giây hoặc phát hiện người khác trong bước cuối, lượt không được xác nhận. Kết quả `liveness_failed` không ghi điểm danh và không kích hoạt mở cửa qua nhận diện.
+2. **Xoay nhẹ theo yêu cầu.** Camera chọn trái hoặc phải ngẫu nhiên. Hướng dẫn hiện trên web và trên Serial Monitor của DevKit khi dùng nút DevKit. Để qua bước này, vị trí tương đối của mũi phải chuyển theo hướng đó ở hai khung liên tiếp. Phép tính theo trục mắt giảm ảnh hưởng của dịch chuyển, thay đổi kích thước và nghiêng ảnh trong mặt phẳng.
+3. **Nhìn thẳng lại.** Camera so khớp lại và yêu cầu cùng Face ID ban đầu. Khung cuối được giữ để xem lại. Thử thách có cửa sổ 25 giây. Khi đã khớp mặt ở bước đầu nhưng không hoàn thành thử thách hoặc khớp người khác ở bước cuối, kết quả là `liveness_failed`. Lượt đó không ghi điểm danh hay mở cửa qua nhận diện.
 
 - **Nút web:** Flask gửi mã lượt qua HTTP nội bộ. Camera xử lý và trả kết quả cho Flask. Ảnh xem trước và ảnh giữ lại của lượt chụp là JPEG đi theo đường HTTP riêng để hiển thị.
 - **Nút DevKit:** DevKit gửi mã yêu cầu qua UART và nhận trạng thái cùng Face ID. Servo có thể mở theo phản hồi hợp lệ trước khi Flask ghi nhận điểm danh. Khi dùng MQTT, DevKit gửi sự kiện đến broker rồi Flask xử lý. Chế độ nội bộ dùng HTTP từ camera để chuyển kết quả về laptop.

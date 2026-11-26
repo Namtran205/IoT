@@ -29,10 +29,14 @@ WiFiClientSecure tls;
 PubSubClient mqtt(tls);
 HardwareSerial camera(2);
 String uartLine, currentRequest;
+String enrollmentRequest;
+bool enrollmentStarted=false;
+unsigned long enrollmentAt=0;
 bool uartOverflow=false, busy=false, gasAlarm=false, doorOpen=false, moving=false, lightReady=false;
 bool gasLedBlinking=false;
 bool buttonLast=HIGH, buttonStable=HIGH;
 bool cameraLink=false, cameraAcknowledged=false;
+bool cameraLivenessFailed=false;
 int gasRaw=0, ledPercent=50, servoCurrent=SERVO_CLOSED, servoFrom=SERVO_CLOSED, servoTarget=SERVO_CLOSED;
 int lightLedPercent=50;
 float lux=NAN;
@@ -87,18 +91,36 @@ void setDoor(bool open) {
   Serial.printf("SERVO command | GPIO%d | %d -> %d deg\n", PIN_SERVO, servoFrom, servoTarget);
   publishState();
 }
-void pollServoCommands() {
+void requestEnrollment() {
+  if (busy || enrollmentRequest.length()) {
+    Serial.println("ENROLL: busy | wait for the current camera request");
+    return;
+  }
+  enrollmentRequest = String("enroll-") + bootId + "-" + String(++requestCounter);
+  enrollmentStarted = false;
+  enrollmentAt = millis();
+  camera.printf("ENROLL:%s\n", enrollmentRequest.c_str());
+  Serial.println("ENROLL request sent | keep one face in front of ESP32-CAM");
+}
+
+void pollUsbCommands() {
   static String command;
+  static bool overflow = false;
   while (Serial.available()) {
     const char character = (char)Serial.read();
     if (character == '\r') continue;
     if (character != '\n') {
-      if (command.length() < 12) command += character;
+      if (command.length() < 16) command += character;
+      else overflow = true;
       continue;
     }
-    if (command == "SERVO_OPEN") setDoor(true);
-    else if (command == "SERVO_CLOSE") setDoor(false);
+    if (!overflow) {
+      if (command == "ENROLL") requestEnrollment();
+      else if (!CONTROLLER_USE_MQTT && command == "SERVO_OPEN") setDoor(true);
+      else if (!CONTROLLER_USE_MQTT && command == "SERVO_CLOSE") setDoor(false);
+    }
     command = "";
+    overflow = false;
   }
 }
 void updateServo() {
@@ -133,7 +155,7 @@ void callback(char *topic,byte *payload,unsigned int size) {
   }
 }
 void requestCheckin() {
-  if(busy){Serial.println("CHECKIN: busy");return;}
+  if(busy||enrollmentRequest.length()){Serial.println("CHECKIN: busy");return;}
 #if CONTROLLER_USE_MQTT
   bool space=false;for(int i=0;i<OUTBOX_SIZE;i++)if(!outbox[i].length())space=true;
   if(!space){Serial.println("CHECKIN: queue full, connect backend first");return;}
@@ -141,11 +163,72 @@ void requestCheckin() {
   currentRequest=String(DEVICE_ID)+"-"+bootId+"-"+String(++requestCounter);
   requestSession=activeSession;
   requestGeneration=activeGeneration;
-  busy=true;requestAt=millis();cameraAcknowledged=false;
+  busy=true;requestAt=millis();cameraAcknowledged=false;cameraLivenessFailed=false;
   camera.print(CONTROLLER_USE_MQTT ? "CHECKIN:" : "CHECKIN_LOCAL:");
   camera.println(currentRequest);
   Serial.printf("CHECKIN request=%s\n",currentRequest.c_str());
 }
+void processEnrollment(const String &line) {
+  const int first = line.indexOf(':', 7);
+  if (first < 0 || !enrollmentRequest.length() || line.substring(7, first) != enrollmentRequest) return;
+  const int second = line.indexOf(':', first + 1);
+  if (second < 0) return;
+
+  const String status = line.substring(first + 1, second);
+  const String number = line.substring(second + 1);
+  if (status == "started" || status == "progress") {
+    enrollmentStarted = true;
+    Serial.printf("ENROLL Sample=%s/5 | keep one face centered\n", number.c_str());
+    return;
+  }
+  enrollmentRequest = "";
+  if (status == "enrolled") {
+    Serial.printf("ENROLL SAVED | Face ID=%s | saved on ESP32-CAM\n", number.c_str());
+  } else if (status == "enrollment_duplicate") {
+    Serial.printf("ENROLL DUPLICATE | existing Face ID=%s\n", number.c_str());
+  } else {
+    Serial.printf("ENROLL FAILED | %s\n", status.c_str());
+  }
+}
+
+void processCheckinGuide(const String &line) {
+  const int start = sizeof("CHECKIN_GUIDE:") - 1;
+  const int first = line.indexOf(':', start);
+  if (!busy || first < 0 || line.substring(start, first) != currentRequest) return;
+  const int second = line.indexOf(':', first + 1);
+  if (second < 0) return;
+  const int third = line.indexOf(':', second + 1);
+  if (third < 0) return;
+
+  const String step = line.substring(first + 1, second);
+  const String hint = line.substring(second + 1, third);
+  const String score = line.substring(third + 1);
+  if (step == "result") {
+    cameraLivenessFailed = hint == "liveness_failed";
+    if (score != "nan") Serial.printf("CHECKIN score | similarity=%s\n", score.c_str());
+    return;
+  }
+
+  // camera's unmirrored image shows the person's left at image right.
+  if (step == "center") Serial.print("1/3 NHIN THANG");
+  else if (step == "turn_left") Serial.print("2/3 XOAY NHE SANG PHAI CUA BAN");
+  else if (step == "turn_right") Serial.print("2/3 XOAY NHE SANG TRAI CUA BAN");
+  else if (step == "return") Serial.print("3/3 NHIN THANG LAI");
+  else return;
+
+  if (hint == "no_face") Serial.print(" | Chua thay mat. Dung giua ong kinh, cach khoang 30-50 cm.");
+  else if (hint == "closer") Serial.print(" | Tien lai gan mot chut.");
+  else if (hint == "farther") Serial.print(" | Lui lai de camera thay tron mat.");
+  else if (hint == "center_face") Serial.print(" | Dua mat ve giua ong kinh.");
+  else if (hint == "dark" || hint == "uneven") Serial.print(" | Them anh sang deu tu phia truoc.");
+  else if (hint == "bright") Serial.print(" | Giam anh sang gat chieu vao mat.");
+  else if (hint == "opposite") Serial.print(" | Dang xoay nguoc huong. Xoay sang phia con lai.");
+  else if (hint == "low_match") Serial.print(" | Da thay mat, do khop con thap.");
+  else if (hint == "hold") Serial.print(" | Giu tu the cho den khi doi buoc.");
+  if (score != "nan") Serial.printf(" | similarity=%s", score.c_str());
+  Serial.println();
+}
+
 void processCamera(String line) {
   if(line=="BUTTON_PONG") {
     lastCameraPong=millis();
@@ -158,6 +241,14 @@ void processCamera(String line) {
     Serial.println("CAMERA ACK: capture requested");
     return;
   }
+  if (line.startsWith("ENROLL:")) {
+    processEnrollment(line);
+    return;
+  }
+  if (line.startsWith("CHECKIN_GUIDE:")) {
+    processCheckinGuide(line);
+    return;
+  }
   if(!line.startsWith("RESULT:"))return;
   int first=line.indexOf(':',7),second=line.indexOf(':',first+1);
   if(first<0||second<0)return;
@@ -166,6 +257,7 @@ void processCamera(String line) {
   bool success=status=="recognized";
   if(success&&(face.length()!=1||face[0]<'0'||face[0]>'6'))return;
   if(!success&&status!="unknown"&&status!="no_face"&&status!="not_aligned"&&status!="error"&&status!="busy"&&status!="not_enrolled"&&status!="multiple_faces")return;
+  if (status == "unknown" && cameraLivenessFailed) status = "liveness_failed";
   int faceId=success?face.toInt():-1;
   if((!CONTROLLER_USE_MQTT||queueResult(id,status,faceId))&&success)setDoor(true);
   Serial.printf("CAMERA: %s Face ID=%d\n",status.c_str(),faceId);busy=false;
@@ -184,6 +276,11 @@ void pollCamera() {
   if(busy&&now-requestAt>CHECKIN_TIMEOUT_MS){
     if(CONTROLLER_USE_MQTT)queueResult(currentRequest,"timeout",-1);
     busy=false;Serial.println(cameraAcknowledged ? "CHECKIN timeout: no camera result" : "CHECKIN timeout: no UART acknowledgement or result");
+  }
+  if (enrollmentRequest.length() && now - enrollmentAt > (enrollmentStarted ? 135000UL : 8000UL)) {
+    enrollmentRequest = "";
+    Serial.println(enrollmentStarted ? "ENROLL timeout: no camera result"
+      : "ENROLL timeout: no reply; check CAM power, UART and firmware");
   }
 }
 void pollButton() {
@@ -289,6 +386,7 @@ void setup() {
   Serial.println("CONTROLLER READY | press GPIO13 to request face recognition");
   Serial.println(CONTROLLER_USE_MQTT ? "ATTENDANCE TRANSPORT: MQTT" : "ATTENDANCE TRANSPORT: ESP32-CAM HTTP");
   Serial.printf("SERVO PWM | GPIO%d | %s\n", PIN_SERVO, servoPwmReady ? "ready" : "setup failed");
+  Serial.println("USB camera command: ENROLL (5 samples, no Wi-Fi required)");
   if (!CONTROLLER_USE_MQTT) Serial.println("USB servo commands: SERVO_CLOSE | SERVO_OPEN");
 }
 void loop() {
@@ -296,7 +394,7 @@ void loop() {
   pollButton();pollCamera();
   if(millis()-sensorAt>=1000UL){sensorAt=millis();readSensors();}
   else updateLED();
-  if (!CONTROLLER_USE_MQTT) pollServoCommands();
+  pollUsbCommands();
   updateServo();
   if(CONTROLLER_USE_MQTT) networkTick();
   delay(2);

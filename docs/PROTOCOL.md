@@ -28,6 +28,8 @@ RESULT:smartgate01-aabbccdd00112233-2:unknown:-1
 
 Status: `recognized`, `unknown`, `no_face`, `not_aligned`, `multiple_faces`, `not_enrolled`, `busy`, `error`; DevKit tự tạo `timeout` nếu quá 90 giây. `no_face` là chưa phát hiện mặt, `not_aligned` là phát hiện được nhưng chưa căn chỉnh được. Không coi chuỗi `SUCCESS` thiếu Face ID là điểm danh hợp lệ. Request ID ngăn phản hồi muộn mở cửa cho lần bấm tiếp theo.
 
+Lệnh `ENROLL` từ USB Serial của DevKit gửi `ENROLL:<request_id>` qua UART. Camera trả `ENROLL:<request_id>:started:0`, sau đó trả `ENROLL:<request_id>:progress:<samples>` khi nhận thêm mẫu. Kết quả cuối là `ENROLL:<request_id>:enrolled:<face_id>` hoặc trạng thái lỗi như `busy`, `enrollment_timeout` hay `enrollment_duplicate`. Chuỗi phản hồi đăng ký chỉ dùng để báo tiến độ và kết quả qua Serial DevKit. Mẫu được lưu trong NVS của camera.
+
 ## Trang cài đặt trên ESP32-CAM
 
 Camera mặc định chạy **Wi-Fi STA**, kết nối hotspot laptop hoặc router 2.4 GHz bằng cấu hình trong `backend/.env` được đưa vào firmware khi nạp. Khi DHCP cấp IP, Serial in `CAMERA URL: http://<IP-camera>/`. HTTP server khởi tạo ngay. Arduino loop theo dõi IP và thử kết nối lại mỗi 20 giây khi chưa có IP. Camera và UART vẫn chạy khi mất mạng. `STATUS` in lại địa chỉ khi đang kết nối.
@@ -55,7 +57,9 @@ Arduino loop chụp và xử lý ảnh. HTTP task đọc JPEG và đưa lệnh v
 
 Backend đồng bộ buổi học với camera qua `POST /api/checkin/sync`. Nút web yêu cầu `POST /api/checkin` kèm mã lượt. DevKit chạy đường nội bộ gửi `CHECKIN_LOCAL:<request_id>` qua UART và camera dùng buổi đã đồng bộ. Camera trả kết quả đang chờ qua HTTP. Backend xác nhận sau khi xử lý và dùng mã lượt để tránh ghi lặp. DevKit có `secrets.h` mặc định dùng đường MQTT với lệnh UART `CHECKIN:<request_id>`.
 
-Trong thử thách xoay đầu, `checkin_snapshot.status` là `challenge`, kèm `liveness_step` bằng `center`, `turn_left`, `turn_right` hoặc `return`. `GET /frame` phục vụ ảnh xem trước cho đến khi kết thúc. Camera chỉ phát hành `recognized` khi hoàn thành thử thách và khớp cùng Face ID ban đầu. Camera trả `liveness_failed` qua HTTP; đường UART dùng `unknown` cho kết quả này để tương thích DevKit hiện có.
+Trong thử thách xoay đầu, `checkin_snapshot.status` là `challenge`, kèm `liveness_step` bằng `center`, `turn_left`, `turn_right` hoặc `return`. `GET /frame` phục vụ ảnh xem trước cho đến khi kết thúc. Camera chỉ phát hành `recognized` khi hoàn thành thử thách và khớp cùng Face ID ban đầu.
+
+Với nút DevKit, camera gửi thêm `CHECKIN_GUIDE:<request_id>:<step>:<hint>:<score>` qua UART để hiện hướng dẫn trực tiếp. Khi `step=result`, trường `hint` chứa trạng thái kết thúc, kể cả `liveness_failed`. DevKit mới dùng thông tin này để báo đúng nguyên nhân. Dòng `RESULT` vẫn dùng `unknown` cho trường hợp đó để các bản DevKit cũ xử lý được.
 
 ## MQTT
 

@@ -158,7 +158,7 @@ static esp_err_t statusHandler(httpd_req_t *req) {
     WiFi.status()==WL_CONNECTED ? WiFi.RSSI() : 0, dropped, reason,
     directButtonReady ? CAM_DIRECT_BUTTON_GPIO : -1, buttonOnline ? "true" : "false", lastRequest, lastStatus,
     snapshotId, snapshotStatus, captured ? "true" : "false", hasSnapshot ? "true" : "false",
-    snapshotLight, matchScore, FACE_REC_THRESHOLD, s.liveness_step ? s.liveness_step : "");
+    snapshotLight, matchScore, CAM_CHECKIN_MATCH_THRESHOLD, s.liveness_step ? s.liveness_step : "");
   return jsonReply(req, "200 OK", body);
 }
 

@@ -25,8 +25,12 @@ public:
   int faceId() const { return identity; }
 
   bool needsMatch(float yaw) const {
-    return isfinite(yaw) && ((current == Step::Center && fabsf(yaw) <= 0.17f)
-      || (current == Step::Return && fabsf(yaw - baseline) <= 0.09f));
+    return isfinite(yaw) && fabsf(yaw) <= 0.20f
+      && (current == Step::Center || (current == Step::Return && fabsf(yaw - baseline) <= 0.11f));
+  }
+
+  bool turnedOpposite(float yaw) const {
+    return current == Step::Turn && isfinite(yaw) && turnOffset(yaw) <= -0.12f;
   }
 
   void observe(float yaw, int matchedId) {
@@ -39,7 +43,7 @@ public:
         }
         break;
       case Step::Turn:
-        if (isfinite(yaw) && direction * (yaw - baseline) >= 0.18f) {
+        if (isfinite(yaw) && turnOffset(yaw) >= 0.16f) {
           if (++turnedFrames == 2) current = Step::Return;
         } else {
           turnedFrames = 0;
@@ -55,6 +59,8 @@ public:
   }
 
 private:
+  float turnOffset(float yaw) const { return direction * (yaw - baseline); }
+
   const int direction;
   Step current = Step::Center;
   float baseline = 0.0f;

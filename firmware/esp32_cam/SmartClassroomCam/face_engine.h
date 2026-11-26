@@ -4,7 +4,8 @@
 bool initializeCameraAndFaces();
 int enrolledFaceCount();
 const char *recognizeOneFace(int &faceId);
-const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBusy)());
+using CheckinFeedback = void (*)(const char *id, const char *step, const char *hint, float score);
+const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBusy)(), CheckinFeedback feedback);
 const char *enrollOneFace(void (*whileBusy)(), const char *token=nullptr);
 bool clearAllFaces(const char *resetToken = nullptr);
 
