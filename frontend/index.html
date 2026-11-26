@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#132a36">
+  <title>Smart Classroom · Điểm danh & giám sát</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script defer src="/assets/app.js"></script>
+  <script defer src="/assets/enrollment.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/" aria-label="Smart Classroom trang chủ"><span class="brand-mark">SC</span><span>Smart Classroom<small>Không gian học tập kết nối</small></span></a><div class="connection"><span id="connection-dot" class="status-dot"></span><span id="connection">Đang kết nối backend…</span><time id="clock"></time></div></header>
+  <main>
+    <section class="page-title"><div><h1>Điểm danh lớp học</h1><p class="muted">Chụp ảnh và nhận diện trực tiếp trên ESP32-CAM.</p></div><nav class="page-actions" aria-label="Chuyển đến"><a href="#student-list" class="button ghost">Danh sách sinh viên</a><a href="#enrollment" class="button secondary">Đăng ký sinh viên</a></nav></section>
+    <div id="error-banner" class="banner error" role="alert" hidden></div>
+    <div id="gas-banner" class="banner warning" role="alert" hidden>Đang cảnh báo khí gas. ESP32 ưu tiên mở cửa và từ chối lệnh đóng.</div>
+    <div id="demo-banner" class="banner info" hidden>Chế độ thử phần mềm đang bật. Bản ghi thử được gắn nhãn “Thử phần mềm” và không điều khiển cửa.</div>
+    <div class="attendance-workspace">
+      <section class="panel checkin-toolbar" aria-labelledby="checkin-camera-heading">
+        <div class="panel-heading">
+          <h2 id="checkin-camera-heading">Camera điểm danh</h2>
+          <span id="camera-badge" class="pill neutral">Chưa kết nối camera</span>
+        </div>
+        <div class="checkin-body">
+          <div class="camera-stage">
+            <img id="checkin-camera-image" alt="Hình xem trước điểm danh từ ESP32-CAM" hidden>
+            <div class="camera-guide" aria-hidden="true"></div>
+            <p id="checkin-camera-placeholder">Kết nối ESP32-CAM để xem ảnh.</p>
+            <span id="checkin-shot-badge" class="checkin-shot-badge" hidden>Ảnh đã chụp</span>
+          </div>
+          <div class="checkin-actions">
+            <form id="camera-connect" class="camera-connect">
+              <label>Địa chỉ IP ESP32-CAM<input name="camera_url" id="camera-url" placeholder="VD: 192.168.137.4" required></label>
+              <button class="button secondary" type="submit">Kết nối camera</button>
+            </form>
+            <div class="checkin-controls">
+              <button id="web-checkin" type="button" class="button primary" disabled>Chụp và điểm danh</button>
+              <button id="checkin-camera-preview" class="button secondary" type="button" disabled>Bật xem trước</button>
+            </div>
+            <p id="checkin-camera-detection" class="checkin-detection" role="status">Chờ kết nối ESP32-CAM.</p>
+            <p id="web-checkin-status" role="status">Mở buổi học và kết nối ESP32-CAM để điểm danh.</p>
+            <div class="button-status">
+              <p id="button-link-status" role="status" hidden></p>
+              <p id="button-checkin-status" role="status">Nhấn nút vật lý khi đã căn mặt trong ảnh.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="panel session-panel" aria-labelledby="session-heading">
+        <div class="panel-heading"><h2 id="session-heading">Buổi học</h2><span id="active-session" class="pill neutral">Chưa mở điểm danh</span></div>
+        <div class="session-toolbar">
+          <label>Chọn buổi học<select id="session-select"><option value="">Chưa có buổi học</option></select></label>
+          <p id="session-caption" class="session-date">Chưa chọn buổi học</p>
+          <div class="session-summary">
+            <div class="metric-value"><strong id="present">0</strong><span id="total">/ 0 sinh viên có mặt</span></div>
+            <div class="progress"><span id="attendance-progress"></span></div>
+          </div>
+          <div class="session-actions"><button id="activate-session" class="button secondary" type="button" disabled>Mở buổi</button><button id="close-session" class="button secondary" type="button" disabled>Kết thúc buổi</button><a class="button ghost" href="#session-form">Tạo buổi mới</a></div>
+        </div>
+      </section>
+    </div>
+    <div class="workspace">
+      <section id="student-list" class="panel attendance-panel">
+        <div class="panel-heading"><h2>Danh sách sinh viên</h2><div class="roster-actions"><button type="button" id="export" class="button secondary" disabled>Xuất CSV</button><button id="reset-attendance" class="button danger" type="button" disabled>Reset điểm danh</button></div></div>
+        <div class="table-tools">
+          <input id="search" type="search" aria-label="Tìm sinh viên" placeholder="Tìm mã sinh viên hoặc họ tên…">
+          <select id="attendance-filter" aria-label="Lọc theo trạng thái điểm danh" disabled><option value="all">Tất cả trạng thái</option><option value="present">Đã điểm danh</option><option value="absent">Chưa điểm danh</option></select>
+        </div>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Kết quả điểm danh"><table><thead><tr><th scope="col">Mã sinh viên</th><th scope="col">Họ và tên</th><th scope="col">Trạng thái</th><th scope="col">Giờ đến</th><th scope="col">Nguồn</th><th scope="col" id="demo-heading" hidden>Kiểm tra</th></tr></thead><tbody id="student-rows"></tbody></table></div>
+        <div id="empty-students" class="empty"><h3>Chưa có sinh viên</h3><a href="#enrollment" class="button secondary">Đăng ký sinh viên</a></div>
+        <div id="empty-filter" class="empty" hidden><h3>Không có sinh viên phù hợp</h3><button id="clear-filters" type="button" class="button secondary">Xóa bộ lọc</button></div>
+        <div class="panel-footer"><span id="row-count">0 sinh viên</span><span id="updated">Chờ dữ liệu</span></div>
+      </section>
+      <aside class="panel events-panel"><div class="panel-heading"><h2>Nhật ký gần đây</h2></div><ol id="events" class="events"><li class="muted">Chưa có hoạt động.</li></ol></aside>
+    </div>
+    <section id="enrollment" class="panel enrollment-panel">
+      <div class="panel-heading"><h2>Đăng ký sinh viên và khuôn mặt</h2><a href="#camera-url" class="button secondary small">Cài đặt camera</a></div>
+      <div class="enrollment-grid"><div>
+        <div class="camera-stage"><img id="camera-image" alt="Ảnh trực tiếp từ ESP32-CAM" hidden><div class="camera-guide" aria-hidden="true"></div><p id="camera-placeholder">Điền IP và bấm Kết nối camera để xem ảnh.</p></div>
+        <div class="camera-tools"><button id="camera-preview" type="button" class="button secondary">Bật xem trước</button><button id="camera-rotate" type="button" class="button secondary" disabled>Xoay ảnh 180°</button><button id="camera-restart" type="button" class="button ghost" disabled>Khởi động lại camera</button></div>
+        <p id="camera-detection" class="camera-message" role="status">Chưa đọc trạng thái camera.</p><p id="camera-diagnostics" class="caption">Khung nét đứt là vùng căn mặt; khung nét liền trên ảnh là kết quả phát hiện thực.</p>
+      </div><form id="enrollment-form">
+        <div class="form-grid"><label>Mã sinh viên<input name="student_code" maxlength="30" placeholder="VD: SV001" required></label><label>Họ và tên<input name="full_name" maxlength="100" placeholder="Nhập họ tên sinh viên" required></label></div>
+        <div class="enrollment-summary"><span id="camera-face-count">Sức chứa camera: tối đa 7 người</span><strong id="camera-samples">0 / 5 mẫu</strong></div><div class="progress"><span id="camera-enroll-progress"></span></div>
+        <p id="enrollment-result" class="camera-message" role="status">Thông tin sinh viên chỉ được thêm khi camera xác nhận lưu đủ 5 mẫu.</p>
+        <a id="enrolled-student" href="#student-list" class="button secondary" hidden>Xem trong danh sách</a>
+        <div class="camera-tools"><button id="start-enrollment" class="button primary" type="submit" disabled>Đăng ký sinh viên & khuôn mặt</button><button id="cancel-enrollment" class="button secondary" type="button" hidden>Dừng đăng ký</button></div>
+        <p class="caption">Giữ một người nhìn thẳng vào camera, đủ sáng và cách khoảng 30–50 cm.</p>
+      </form></div>
+    </section>
+    <section class="setup-grid">
+      <form id="student-form" class="panel setup-panel"><div class="panel-heading"><div><p class="eyebrow">ĐÃ CÓ KHUÔN MẶT TRÊN CAMERA?</p><h2>Liên kết Face ID có sẵn</h2></div></div><div class="form-grid"><label>Mã sinh viên<input name="student_code" maxlength="30" placeholder="VD: SV001" required></label><label>Họ và tên<input name="full_name" maxlength="100" placeholder="Nhập họ tên sinh viên" required></label><label>Camera<input name="camera_id" maxlength="40" value="CAM01" required></label><label>Face ID trên camera<input name="face_id" type="number" min="0" max="6" step="1" value="0" required></label></div><p class="caption">Dùng khi đã đăng ký khuôn mặt riêng trên camera hoặc thử phần mềm. Nhập đúng Face ID đã lưu; thao tác này không quét mặt mới.</p><button class="button secondary" type="submit">Liên kết vào danh sách</button></form>
+      <form id="session-form" class="panel setup-panel"><div class="panel-heading"><div><p class="eyebrow">BUỔI HỌC</p><h2>Mở lượt điểm danh</h2></div></div><label>Tên buổi học<input name="name" maxlength="100" placeholder="VD: IoT · Ca sáng · Phòng A101" required></label><label>Ngày học<input id="session-date" name="date" type="date" required></label><p class="caption">Chỉ một buổi được mở tại một thời điểm. Mỗi sinh viên được ghi nhận một lần trong buổi học.</p><button class="button primary" type="submit">Tạo và mở buổi học</button></form>
+    </section>
+    <section class="device-workspace" aria-label="Thiết bị và cảm biến">
+      <div class="metrics">
+        <article class="metric"><span class="metric-label">ÁNH SÁNG</span><div class="metric-value"><strong id="lux">—</strong><span>lux</span></div><small>BH1750</small></article>
+        <article class="metric"><span class="metric-label">TÍN HIỆU KHÍ GAS</span><div class="metric-value"><strong id="gas">—</strong><span>ADC</span></div><small id="gas-status">Chưa có dữ liệu MQ-2</small></article>
+        <article class="metric"><span class="metric-label">ĐÈN CHIẾU SÁNG</span><div class="metric-value"><strong id="led">—</strong><span>%</span></div><small>Tự điều chỉnh theo ánh sáng</small></article>
+      </div>
+      <section class="panel door-panel"><div class="panel-heading"><h2>Cửa ra vào</h2><span id="device-badge" class="pill neutral">Chưa kết nối</span></div><div class="door-display"><span class="door-illustration" aria-hidden="true">▯</span><div><strong id="door">Chưa rõ trạng thái</strong><p id="door-detail">Chờ phản hồi từ ESP32</p></div></div><div class="button-group"><button type="button" id="open-door" class="button primary" disabled>Mở cửa</button><button type="button" id="close-door" class="button secondary" disabled>Đóng cửa</button></div><p id="devkit-ip" class="caption">IP DevKit · Chờ thiết bị gửi IP</p></section>
+    </section>
+    <details class="panel data-reset-panel">
+      <summary>Quản lý dữ liệu thử nghiệm</summary>
+      <p>Xóa danh sách sinh viên, buổi học, lịch sử điểm danh và tất cả khuôn mặt đã lưu trên ESP32-CAM.</p>
+      <button id="data-reset" class="button danger" type="button" disabled>Xóa dữ liệu thử nghiệm</button>
+      <p id="data-reset-status" class="caption" role="status"></p>
+    </details>
+    <footer class="footer"><span>Smart Classroom · IoT & Edge AI</span><span>ESP32-CAM nhận diện · Backend lưu kết quả</span></footer>
+  </main><div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
+
