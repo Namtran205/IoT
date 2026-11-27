@@ -9,6 +9,7 @@ bool cameraWebPopCommand(CameraCommand &command, char *token=nullptr, size_t tok
 bool cameraWebPreviewWanted();
 bool cameraWebCheckinFrameHeld();
 bool cameraWebRadioEnabled();
+uint32_t cameraWebAddress();
 void cameraWebRadioOff();
 // Takes ownership of a malloc-allocated JPEG. Camera / inference have a single
 // owner (Arduino loop); the HTTP task only serves this independent JPEG copy.

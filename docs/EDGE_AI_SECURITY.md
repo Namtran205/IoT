@@ -34,7 +34,7 @@ ESP32-CAM chạy chuỗi chụp, dò mặt, căn chỉnh và trích vector. Vớ
 
 1. **Nhìn thẳng.** Camera xác định Face ID ban đầu và ghi lại vị trí tương đối của mũi so với mắt và khóe miệng.
 2. **Xoay nhẹ theo yêu cầu.** Camera chọn trái hoặc phải ngẫu nhiên. Hướng dẫn hiện trên web và trên Serial Monitor của DevKit khi dùng nút DevKit. Để qua bước này, vị trí tương đối của mũi phải chuyển theo hướng đó ở hai khung liên tiếp. Phép tính theo trục mắt giảm ảnh hưởng của dịch chuyển, thay đổi kích thước và nghiêng ảnh trong mặt phẳng.
-3. **Nhìn thẳng lại.** Camera so khớp lại và yêu cầu cùng Face ID ban đầu. Khung cuối được giữ để xem lại. Thử thách có cửa sổ 25 giây. Khi đã khớp mặt ở bước đầu nhưng không hoàn thành thử thách hoặc khớp người khác ở bước cuối, kết quả là `liveness_failed`. Lượt đó không ghi điểm danh hay mở cửa qua nhận diện.
+3. **Nhìn thẳng lại.** Camera so khớp lại và yêu cầu cùng Face ID ban đầu. Khung cuối được giữ để xem lại. Mỗi bước có thời hạn riêng. Camera chờ tới 25 giây để khớp mặt ban đầu, 16 giây để xoay và 12 giây để nhìn thẳng lại. Sau khi khớp mặt, camera cho phép mất dấu tạm thời tới 8 giây. Khi lượt đã khớp mặt ở bước đầu nhưng không hoàn thành thử thách hoặc khớp người khác ở bước cuối, kết quả là `liveness_failed`. Lượt đó không ghi điểm danh hay mở cửa qua nhận diện.
 
 - **Nút web:** Flask gửi mã lượt qua HTTP nội bộ. Camera xử lý và trả kết quả cho Flask. Ảnh xem trước và ảnh giữ lại của lượt chụp là JPEG đi theo đường HTTP riêng để hiển thị.
 - **Nút DevKit:** DevKit gửi mã yêu cầu qua UART và nhận trạng thái cùng Face ID. Servo có thể mở theo phản hồi hợp lệ trước khi Flask ghi nhận điểm danh. Khi dùng MQTT, DevKit gửi sự kiện đến broker rồi Flask xử lý. Chế độ nội bộ dùng HTTP từ camera để chuyển kết quả về laptop.

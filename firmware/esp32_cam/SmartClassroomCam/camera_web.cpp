@@ -41,6 +41,7 @@ static bool previewRequested = false, radioEnabled = false;
 static bool checkinFrameHeld = false;
 static bool checkinChallengeActive = false;
 static bool stationConfigured = false;
+static bool wifiEventsRegistered = false;
 static unsigned long lastNetworkPoll = 0, lastReconnect = 0;
 static uint32_t lastStationIP = 0;
 static int lastStationStatus = -1;
@@ -293,6 +294,7 @@ static esp_err_t actionHandler(httpd_req_t *req) {
 }
 
 bool cameraWebBegin(const char *ssid, const char *password) {
+  if (radioEnabled) return true;
   if (!CAM_SETUP_WIFI_ENABLED) { Serial.println("WIFI DISABLED in camera_config.h"); return false; }
 #if defined(CAM_WIFI_SSID) && defined(CAM_WIFI_PASSWORD)
   // Preserve separate-file configuration, but explicit .ino values win.
@@ -303,21 +305,26 @@ bool cameraWebBegin(const char *ssid, const char *password) {
     Serial.println("WIFI CONFIG MISSING: set CAM_WIFI_SSID and CAM_WIFI_PASSWORD in backend/.env, run start.bat, then upload.");
     return false;
   }
-  commands = xQueueCreate(1, sizeof(QueuedCommand));
-  frameMutex = xSemaphoreCreateMutex();
-  checkinFrameMutex = xSemaphoreCreateMutex();
+  if (!commands) commands = xQueueCreate(1, sizeof(QueuedCommand));
+  if (!frameMutex) frameMutex = xSemaphoreCreateMutex();
+  if (!checkinFrameMutex) checkinFrameMutex = xSemaphoreCreateMutex();
   if (!commands || !frameMutex || !checkinFrameMutex) { Serial.println("CAMERA WEB ERROR: cannot allocate command queue / frame mutex"); return false; }
   wifi_mode_t mode = CAM_SETUP_AP_ENABLED ? (stationConfigured ? WIFI_AP_STA : WIFI_AP) : WIFI_STA;
   if (!WiFi.mode(mode)) { Serial.println("WIFI ERROR: cannot start radio"); return false; }
-  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-    portENTER_CRITICAL(&networkMux);
-    disconnectCount++; disconnectReason=info.wifi_sta_disconnected.reason;
-    portEXIT_CRITICAL(&networkMux);
-  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  if (!wifiEventsRegistered) {
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+      portENTER_CRITICAL(&networkMux);
+      disconnectCount++; disconnectReason=info.wifi_sta_disconnected.reason;
+      portEXIT_CRITICAL(&networkMux);
+    }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    wifiEventsRegistered = true;
+  }
   if (CAM_SETUP_AP_ENABLED) {
     IPAddress ap(192,168,4,1), mask(255,255,255,0);
     if (!WiFi.softAPConfig(ap, ap, mask) || !WiFi.softAP(CAM_AP_SSID, CAM_AP_PASSWORD, 1, false, 2)) {
-      Serial.println("WIFI ERROR: cannot start optional setup AP"); return false;
+      Serial.println("WIFI ERROR: cannot start optional setup AP");
+      WiFi.mode(WIFI_OFF);
+      return false;
     }
     Serial.printf("OPTIONAL AP: %s | http://192.168.4.1/\n", CAM_AP_SSID);
   }
@@ -332,7 +339,11 @@ bool cameraWebBegin(const char *ssid, const char *password) {
   config.stack_size = 6144;
   config.recv_wait_timeout = 2; config.send_wait_timeout = 2;
   esp_err_t error = httpd_start(&server, &config);
-  if (error != ESP_OK) { Serial.printf("CAMERA WEB ERROR: HTTP server start 0x%x\n", error); return false; }
+  if (error != ESP_OK) {
+    Serial.printf("CAMERA WEB ERROR: HTTP server start 0x%x\n", error);
+    WiFi.mode(WIFI_OFF);
+    return false;
+  }
   httpd_uri_t route = {};
   route.uri = "/"; route.method = HTTP_GET; route.handler = rootHandler;
   httpd_register_uri_handler(server, &route);
@@ -419,6 +430,15 @@ bool cameraWebPreviewWanted() {
 
 bool cameraWebRadioEnabled() { return radioEnabled; }
 
+uint32_t cameraWebAddress() {
+  if (!radioEnabled) return 0;
+  if (stationConfigured && WiFi.status() == WL_CONNECTED) {
+    const uint32_t ip = WiFi.localIP();
+    if (ip) return ip;
+  }
+  return CAM_SETUP_AP_ENABLED ? (uint32_t)WiFi.softAPIP() : 0;
+}
+
 void cameraWebStoreFrame(uint8_t *jpeg, size_t length) {
   if (!frameMutex || xSemaphoreTake(frameMutex, pdMS_TO_TICKS(20)) != pdTRUE) { free(jpeg); return; }
   free(cachedFrame); cachedFrame = jpeg; cachedLength = length;
@@ -478,6 +498,8 @@ void cameraWebRadioOff() {
   if (server) { httpd_stop(server); server = nullptr; }
   WiFi.softAPdisconnect(true); WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
   radioEnabled = false;
+  lastStationIP = 0;
+  lastStationStatus = -1;
   if (checkinFrameMutex) {
     xSemaphoreTake(checkinFrameMutex, portMAX_DELAY);
     releaseCheckinFrame();
@@ -487,5 +509,5 @@ void cameraWebRadioOff() {
     releasePreviewFrame();
     xSemaphoreGive(frameMutex);
   }
-  Serial.println("WIFI OFF | UART and local inference remain available | reboot to reopen setup");
+  Serial.println("WIFI OFF | UART and local inference remain available | use WIFI_ON to reconnect");
 }

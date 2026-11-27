@@ -10,6 +10,9 @@
    tren LAPTOP dang phat hotspot. Hinh anh den tu ESP32-CAM.
 */
 #include <Arduino.h>
+#include <IPAddress.h>
+#include "esp_camera.h"
+#include "camera_uart_preview.h"
 #include "face_engine.h"
 #include "camera_web.h"
 #include "camera_attendance.h"
@@ -17,8 +20,8 @@
 
 // DIEN WI-FI MOBILE HOTSPOT CUA LAPTOP TAI DAY (bang tan 2.4 GHz).
 // Khong phai mat khau dang nhap Windows. Giu thong tin trong dau ngoac kep.
-const char *ssid = "";
-const char *password = "";
+const char *ssid = "LAPTOP-S4NG3U8F 5215";
+const char *password = "098h90B;";
 
 HardwareSerial controller(1);
 static String uartLine, usbLine;
@@ -26,6 +29,7 @@ static const char *uartEnrollmentId = nullptr;
 static int uartEnrollmentSamples = 0;
 static bool cameraReady = false, overflowUART = false, overflowUSB = false;
 static unsigned long lastPreview=0;
+static uint32_t announcedWifiIP = 0;
 static portMUX_TYPE buttonMux = portMUX_INITIALIZER_UNLOCKED;
 static bool directPressPending = false;
 static uint32_t buttonBootId, buttonSequence = 0;
@@ -65,10 +69,46 @@ static bool validRequest(const String &id) {
   return true;
 }
 
+static void printWifiStatus(Stream &output) {
+  const uint32_t ip = cameraWebAddress();
+  if (ip) output.printf("CAM WIFI: CAMERA URL: http://%s/\n", IPAddress(ip).toString().c_str());
+  else if (cameraWebRadioEnabled()) output.printf("CAM WIFI: waiting for hotspot | check 2.4 GHz and Wi-Fi settings\n");
+  else output.printf("CAM WIFI: OFF | UART still available\n");
+}
+
+static bool handleWifiCommand(const String &command, Stream &output, bool cameraBusy) {
+  if (command == "WIFI_STATUS") {
+    printWifiStatus(output);
+    return true;
+  }
+  const bool turnOn = command == "WIFI_ON";
+  if (!turnOn && command != "WIFI_OFF") return false;
+  if (cameraBusy) output.printf("CAM WIFI: busy | wait for enrollment or check-in to finish\n");
+  else if (turnOn && !cameraWebBegin(ssid, password))
+    output.printf("CAM WIFI: start failed | check CAM_WIFI_SSID and CAM_WIFI_PASSWORD in backend/.env\n");
+  else {
+    if (!turnOn) cameraWebRadioOff();
+    printWifiStatus(output);
+  }
+  return true;
+}
+
+static bool handleControllerCommand(const String &command, bool cameraBusy) {
+  if (command != "FRAME") return handleWifiCommand(command, controller, cameraBusy);
+  if (cameraReady) cameraUartPreviewRequest();
+  else controller.printf("FRAME_ERROR:camera_not_ready\n");
+  return true;
+}
+
 static bool readButtonCommand(const String &line, String &id, bool &local) {
   if (line == "BUTTON_PING") {
     cameraWebNoteButton();
-    controller.println("BUTTON_PONG");
+    controller.printf("BUTTON_PONG\n");
+    const uint32_t ip = cameraWebAddress();
+    if (announcedWifiIP != ip) {
+      announcedWifiIP = ip;
+      printWifiStatus(controller);
+    }
     return false;
   }
   local = line.startsWith("CHECKIN_LOCAL:");
@@ -150,6 +190,7 @@ static void replyBusy() {
   }
   String command;
   while (readLine(controller, uartLine, overflowUART, command)) {
+    if (handleControllerCommand(command, true)) continue;
     String id;
     bool local;
     if (readButtonCommand(command, id, local)) {
@@ -207,8 +248,9 @@ void setup() {
   Serial.println("Smart Classroom CAM | on-device face inference | setup preview available");
   Serial.printf("BOOT reset_reason=%d | uptime_ms=%lu\n", (int)esp_reset_reason(), millis());
   cameraReady = initializeCameraAndFaces();
+  cameraUartPreviewBegin(controller);
   if (!cameraWebBegin(ssid, password)) Serial.println("Camera web unavailable; see Wi-Fi error above. UART / USB still work.");
-  Serial.println("USB commands: STATUS | ENROLL | TEST | CLEAR_FACES | WIFI_OFF | RESTART");
+  Serial.println("USB commands: STATUS | ENROLL | TEST | CLEAR_FACES | WIFI_ON | WIFI_OFF | WIFI_STATUS | RESTART");
 }
 
 void loop() {
@@ -216,6 +258,7 @@ void loop() {
   handleDirectButton(false);
   String command;
   while (readLine(controller, uartLine, overflowUART, command)) {
+    if (handleControllerCommand(command, false)) continue;
     String id;
     bool local;
     if (readButtonCommand(command, id, local)) {
@@ -250,9 +293,9 @@ void loop() {
     } else if (command == "CLEAR_FACES") {
       if (clearAllFaces()) { Serial.println("All faces cleared. Rebooting."); delay(300); ESP.restart(); }
       else Serial.println("ERROR: cannot clear face storage");
-    } else if (command=="WIFI_OFF") cameraWebRadioOff();
-    else if (command=="RESTART") { delay(200); ESP.restart(); }
-    else Serial.println("Unknown command. Use STATUS, ENROLL, TEST, CLEAR_FACES, WIFI_OFF, RESTART.");
+    } else if (command=="RESTART") { delay(200); ESP.restart(); }
+    else if (!handleWifiCommand(command, Serial, false))
+      Serial.println("Unknown command. Use STATUS, ENROLL, TEST, CLEAR_FACES, WIFI_ON, WIFI_OFF, WIFI_STATUS, RESTART.");
   }
   CameraCommand action;
   char enrollmentToken[40] = {};
@@ -275,6 +318,11 @@ void loop() {
   }
   if (cameraReady && cameraWebPreviewWanted() && millis()-lastPreview>=CAM_PREVIEW_INTERVAL_MS) {
     previewOneFrame(); lastPreview=millis();
+  }
+  if (cameraUartPreviewPending()) {
+    camera_fb_t *frame = esp_camera_fb_get();
+    cameraUartPreviewFrame(frame);
+    if (frame) esp_camera_fb_return(frame);
   }
   delay(10);
 }

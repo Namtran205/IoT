@@ -90,7 +90,7 @@ class CameraCheckins:
             if already_pending:
                 raise CameraConflict("Camera đang chờ kết quả của lần bấm trước.")
             event_id = "web-" + uuid.uuid4().hex
-            db.execute("INSERT INTO web_checkins VALUES(?,?,?,?)", (event_id, session_id, generation, time.time() + 45))
+            db.execute("INSERT INTO web_checkins VALUES(?,?,?,?)", (event_id, session_id, generation, time.time() + 65))
         try:
             self.exchange(base)
         except CameraError as exc:

@@ -91,7 +91,14 @@ void setDoor(bool open) {
   Serial.printf("SERVO command | GPIO%d | %d -> %d deg\n", PIN_SERVO, servoFrom, servoTarget);
   publishState();
 }
+bool cameraReadyForRequest(const char *operation) {
+  if (cameraLink) return true;
+  Serial.printf("%s: camera UART offline | wait for CAMERA UART: connected\n", operation);
+  return false;
+}
+
 void requestEnrollment() {
+  if (!cameraReadyForRequest("ENROLL")) return;
   if (busy || enrollmentRequest.length()) {
     Serial.println("ENROLL: busy | wait for the current camera request");
     return;
@@ -102,6 +109,8 @@ void requestEnrollment() {
   camera.printf("ENROLL:%s\n", enrollmentRequest.c_str());
   Serial.println("ENROLL request sent | keep one face in front of ESP32-CAM");
 }
+
+void requestCheckin();
 
 void pollUsbCommands() {
   static String command;
@@ -116,6 +125,13 @@ void pollUsbCommands() {
     }
     if (!overflow) {
       if (command == "ENROLL") requestEnrollment();
+      else if (command == "CHECKIN") requestCheckin();
+      else if (command == "FRAME") {
+        if (cameraReadyForRequest("FRAME")) camera.println(command);
+      }
+      else if (command == "WIFI_ON" || command == "WIFI_OFF" || command == "WIFI_STATUS") {
+        if (cameraReadyForRequest(command.c_str())) camera.println(command);
+      }
       else if (!CONTROLLER_USE_MQTT && command == "SERVO_OPEN") setDoor(true);
       else if (!CONTROLLER_USE_MQTT && command == "SERVO_CLOSE") setDoor(false);
     }
@@ -155,6 +171,7 @@ void callback(char *topic,byte *payload,unsigned int size) {
   }
 }
 void requestCheckin() {
+  if (!cameraReadyForRequest("CHECKIN")) return;
   if(busy||enrollmentRequest.length()){Serial.println("CHECKIN: busy");return;}
 #if CONTROLLER_USE_MQTT
   bool space=false;for(int i=0;i<OUTBOX_SIZE;i++)if(!outbox[i].length())space=true;
@@ -230,6 +247,14 @@ void processCheckinGuide(const String &line) {
 }
 
 void processCamera(String line) {
+  if (line.startsWith("FRAME_")) {
+    Serial.println(line);
+    return;
+  }
+  if (line.startsWith("CAM WIFI:")) {
+    Serial.println(line);
+    return;
+  }
   if(line=="BUTTON_PONG") {
     lastCameraPong=millis();
     if(!cameraLink)Serial.println("CAMERA UART: connected");
@@ -271,13 +296,20 @@ void pollCamera() {
     else {uartLine="";uartOverflow=true;}
   }
   const unsigned long now=millis();
-  if(now-lastCameraPing>=2000UL){lastCameraPing=now;camera.println("BUTTON_PING");}
-  if(cameraLink&&now-lastCameraPong>=8000UL){cameraLink=false;Serial.println("CAMERA UART: no response");}
-  if(busy&&now-requestAt>CHECKIN_TIMEOUT_MS){
+  if (now - lastCameraPing >= CAMERA_UART_PING_MS) {
+    lastCameraPing = now;
+    camera.println("BUTTON_PING");
+  }
+  if (cameraLink && now - lastCameraPong >= CAMERA_UART_TIMEOUT_MS) {
+    cameraLink = false;
+    Serial.println("CAMERA UART: no response");
+  }
+  const unsigned long checkinTimeout = cameraAcknowledged ? CHECKIN_TIMEOUT_MS : CAMERA_UART_TIMEOUT_MS;
+  if(busy&&now-requestAt>=checkinTimeout){
     if(CONTROLLER_USE_MQTT)queueResult(currentRequest,"timeout",-1);
     busy=false;Serial.println(cameraAcknowledged ? "CHECKIN timeout: no camera result" : "CHECKIN timeout: no UART acknowledgement or result");
   }
-  if (enrollmentRequest.length() && now - enrollmentAt > (enrollmentStarted ? 135000UL : 8000UL)) {
+  if (enrollmentRequest.length() && now - enrollmentAt >= (enrollmentStarted ? 135000UL : CAMERA_UART_TIMEOUT_MS)) {
     enrollmentRequest = "";
     Serial.println(enrollmentStarted ? "ENROLL timeout: no camera result"
       : "ENROLL timeout: no reply; check CAM power, UART and firmware");
@@ -376,6 +408,7 @@ void setup() {
 #endif
   writeServo(SERVO_CLOSED);writeLED(50);Wire.begin(PIN_SDA,PIN_SCL);
   Wire.beginTransmission(0x23);Wire.write(0x10);Wire.endTransmission();
+  camera.setRxBufferSize(8192);
   camera.begin(115200,SERIAL_8N1,PIN_UART_RX,PIN_UART_TX);
 #if CONTROLLER_USE_MQTT
   WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(true);configTime(0,0,"pool.ntp.org","time.google.com");
@@ -387,11 +420,12 @@ void setup() {
   Serial.println(CONTROLLER_USE_MQTT ? "ATTENDANCE TRANSPORT: MQTT" : "ATTENDANCE TRANSPORT: ESP32-CAM HTTP");
   Serial.printf("SERVO PWM | GPIO%d | %s\n", PIN_SERVO, servoPwmReady ? "ready" : "setup failed");
   Serial.println("USB camera command: ENROLL (5 samples, no Wi-Fi required)");
+  Serial.println("USB camera Wi-Fi commands: WIFI_ON | WIFI_OFF | WIFI_STATUS");
   if (!CONTROLLER_USE_MQTT) Serial.println("USB servo commands: SERVO_CLOSE | SERVO_OPEN");
 }
 void loop() {
   // Run local safety and UART before each bounded network attempt.
-  pollButton();pollCamera();
+  pollCamera();pollButton();
   if(millis()-sensorAt>=1000UL){sensorAt=millis();readSensors();}
   else updateLED();
   pollUsbCommands();

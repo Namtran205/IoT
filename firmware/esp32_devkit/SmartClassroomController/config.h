@@ -10,5 +10,7 @@ static const int SERVO_OPEN=40, SERVO_CLOSED=120;
 static const int GAS_ALARM_ADC=250, GAS_CLEAR_ADC=180;
 static const unsigned long GAS_LED_TOGGLE_MS=350UL;
 static const unsigned long GAS_LED_MIN_BLINK_MS=15000UL;
+static const unsigned long CAMERA_UART_PING_MS=2000UL;
+static const unsigned long CAMERA_UART_TIMEOUT_MS=8000UL;
 static const unsigned long CHECKIN_TIMEOUT_MS=90000UL;
 

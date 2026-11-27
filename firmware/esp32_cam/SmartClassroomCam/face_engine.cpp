@@ -5,6 +5,7 @@
 #include "face_liveness.h"
 #include "camera_config.h"
 #include "camera_web.h"
+#include "camera_uart_preview.h"
 #include "esp_system.h"
 #include "esp_camera.h"
 #include "img_converters.h"
@@ -262,6 +263,7 @@ static Capture captureAligned(int retry=0, bool keepSnapshot=false, bool discard
     if (old) esp_camera_fb_return(old);
   }
   camera_fb_t *frame = esp_camera_fb_get();
+  cameraUartPreviewFrame(frame);
   if (!frame) {
     capture.status = "capture_error";
     strlcpy(state.detection,capture.status,sizeof(state.detection)); publishStatus(); return capture;
@@ -450,12 +452,15 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
   resultStatus("recognizing");
   Serial.println("LIVENESS 1/3 | Look straight at the camera");
   const unsigned long started = millis();
-  unsigned long lastFeedback = started;
+  unsigned long stepStarted = started;
+  unsigned long stepLimit = CAM_LIVENESS_CENTER_MS;
   if (feedback) feedback(checkinId, state.liveness_step, "start", NAN);
   unsigned long lastSeen = started;
   const char *status = "no_face";
+  const char *lastHint = nullptr, *pendingHint = nullptr;
+  int hintFrames = 0;
   int attempts = 0, retry = 0;
-  while (millis() - started < CAM_LIVENESS_TIMEOUT_MS) {
+  while (millis() - stepStarted < stepLimit) {
     whileBusy();
     Capture capture = captureAligned(retry, true, attempts == 0);
     ++attempts;
@@ -469,7 +474,7 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
     if (needsMatch) match = matchCapture(capture);
     if (isfinite(match.score)) state.match_score = match.score;
     const bool faceLost = before != Step::Center && millis() - lastSeen > CAM_LIVENESS_FACE_LOST_MS;
-    const bool expired = millis() - started >= CAM_LIVENESS_TIMEOUT_MS;
+    const bool expired = millis() - stepStarted >= stepLimit;
     if (multipleFaces || frameError) {
       status = multipleFaces ? "multiple_faces" : "error";
     } else if (before != Step::Center) {
@@ -485,9 +490,11 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
     if (after == Step::Turn && before != after) {
       state.liveness_step = turnRight ? "turn_right" : "turn_left";
       status = "liveness_failed";
+      stepLimit = CAM_LIVENESS_TURN_MS;
       Serial.printf("LIVENESS 2/3 | Turn towards %s of the image\n", turnRight ? "RIGHT" : "LEFT");
     } else if (after == Step::Return && before != after) {
       state.liveness_step = "return";
+      stepLimit = CAM_LIVENESS_RETURN_MS;
       Serial.println("LIVENESS 3/3 | Look straight again");
     } else if (after == Step::Passed) {
       faceId = challenge.faceId();
@@ -495,11 +502,23 @@ const char *recognizeLiveFace(int &faceId, const char *checkinId, void (*whileBu
       if (capture.snapshot)
         cameraWebStoreCheckinFrame(checkinId, capture.snapshot->buf, capture.snapshot->len);
     }
-    if (feedback && !fatal && after != Step::Passed && after != Step::WrongIdentity
-        && (after != before || millis() - lastFeedback >= 1400UL)) {
-      lastFeedback = millis();
-      feedback(checkinId, state.liveness_step,
-               after != before ? "start" : checkinHint(capture, challenge, needsMatch && !matched), match.score);
+    if (!fatal && after != Step::Passed && after != Step::WrongIdentity) {
+      if (after != before) {
+        stepStarted = lastSeen = millis();
+        lastHint = pendingHint = nullptr;
+        hintFrames = 0;
+        if (feedback) feedback(checkinId, state.liveness_step, "start", match.score);
+      } else if (feedback && millis() - stepStarted >= 2500UL) {
+        const char *hint = checkinHint(capture, challenge, needsMatch && !matched);
+        if (hint != pendingHint) {
+          pendingHint = hint;
+          hintFrames = 1;
+        } else if (hintFrames < 2) ++hintFrames;
+        if (hintFrames == 2 && hint != lastHint) {
+          lastHint = hint;
+          feedback(checkinId, state.liveness_step, hint, match.score);
+        }
+      }
     }
     const char *label = after == Step::Turn ? (turnRight ? "TURN RIGHT" : "TURN LEFT")
       : after == Step::Return ? "LOOK STRAIGHT AGAIN" : "LOOK STRAIGHT";

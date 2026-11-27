@@ -84,7 +84,7 @@ $('web-checkin').onclick = async () => {
   renderCheckinAvailability();
   try {
     const {event_id} = await api('/checkins', {session_id:selected.id, generation:selected.generation});
-    const deadline = Date.now() + 52000;
+    const deadline = Date.now() + 72000;
     while (Date.now() < deadline) {
       let result;
       try { result = await api('/checkins/' + encodeURIComponent(event_id)); }

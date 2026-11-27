@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/assets/styles.css">
   <script defer src="/assets/app.js"></script>
   <script defer src="/assets/enrollment.js"></script>
+  <script defer src="/assets/usb-camera.js"></script>
 </head>
 <body>
   <header class="topbar"><a class="brand" href="/" aria-label="Smart Classroom trang chủ"><span class="brand-mark">SC</span><span>Smart Classroom<small>Không gian học tập kết nối</small></span></a><div class="connection"><span id="connection-dot" class="status-dot"></span><span id="connection">Đang kết nối backend…</span><time id="clock"></time></div></header>
@@ -60,6 +61,26 @@
         </div>
       </section>
     </div>
+    <details id="usb-camera" class="panel usb-camera-panel">
+      <summary>Xem camera qua USB DevKit</summary>
+      <div class="checkin-body">
+        <div class="camera-stage">
+          <img id="usb-camera-image" alt="Ảnh ESP32-CAM truyền qua USB DevKit" hidden>
+          <div class="camera-guide" aria-hidden="true"></div>
+          <p id="usb-camera-placeholder">Kết nối DevKit để xem ảnh và căn mặt.</p>
+        </div>
+        <div class="checkin-actions">
+          <p>Đóng Serial Monitor của Arduino trước khi chọn cổng COM của DevKit.</p>
+          <div class="checkin-controls">
+            <button id="usb-camera-connect" type="button" class="button primary">Kết nối USB</button>
+            <button id="usb-camera-checkin" type="button" class="button secondary" disabled>Điểm danh qua DevKit</button>
+            <button id="usb-camera-enroll" type="button" class="button secondary" disabled>Đăng ký mặt offline</button>
+          </div>
+          <p id="usb-camera-status" role="status">Bạn cũng có thể bấm nút vật lý trên DevKit để điểm danh.</p>
+          <p id="usb-camera-result" class="checkin-detection" role="status"></p>
+        </div>
+      </div>
+    </details>
     <div class="workspace">
       <section id="student-list" class="panel attendance-panel">
         <div class="panel-heading"><h2>Danh sách sinh viên</h2><div class="roster-actions"><button type="button" id="export" class="button secondary" disabled>Xuất CSV</button><button id="reset-attendance" class="button danger" type="button" disabled>Reset điểm danh</button></div></div>

@@ -26,9 +26,13 @@ RESULT:smartgate01-aabbccdd00112233-1:recognized:0
 RESULT:smartgate01-aabbccdd00112233-2:unknown:-1
 ```
 
-Status: `recognized`, `unknown`, `no_face`, `not_aligned`, `multiple_faces`, `not_enrolled`, `busy`, `error`; DevKit tự tạo `timeout` nếu quá 90 giây. `no_face` là chưa phát hiện mặt, `not_aligned` là phát hiện được nhưng chưa căn chỉnh được. Không coi chuỗi `SUCCESS` thiếu Face ID là điểm danh hợp lệ. Request ID ngăn phản hồi muộn mở cửa cho lần bấm tiếp theo.
+Các trạng thái gồm `recognized`, `unknown`, `no_face`, `not_aligned`, `multiple_faces`, `not_enrolled`, `busy` và `error`. DevKit chỉ gửi yêu cầu khi còn phản hồi `BUTTON_PONG`. DevKit tự tạo `timeout` nếu đã chờ 8 giây mà chưa có xác nhận, hoặc 90 giây tính từ lúc gửi nếu camera đã xác nhận. `no_face` là chưa phát hiện mặt, còn `not_aligned` là đã phát hiện được mặt nhưng chưa căn chỉnh được. Request ID ngăn phản hồi muộn mở cửa cho lần bấm tiếp theo.
 
 Lệnh `ENROLL` từ USB Serial của DevKit gửi `ENROLL:<request_id>` qua UART. Camera trả `ENROLL:<request_id>:started:0`, sau đó trả `ENROLL:<request_id>:progress:<samples>` khi nhận thêm mẫu. Kết quả cuối là `ENROLL:<request_id>:enrolled:<face_id>` hoặc trạng thái lỗi như `busy`, `enrollment_timeout` hay `enrollment_duplicate`. Chuỗi phản hồi đăng ký chỉ dùng để báo tiến độ và kết quả qua Serial DevKit. Mẫu được lưu trong NVS của camera.
+
+DevKit cũng chuyển `WIFI_ON`, `WIFI_OFF` và `WIFI_STATUS` từ USB Serial tới camera. Camera trả phản hồi bắt đầu bằng `CAM WIFI:` và báo địa chỉ sau khi kết nối. Các lệnh đổi trạng thái Wi-Fi chờ lượt nhận diện hoặc đăng ký hiện tại kết thúc.
+
+Cửa sổ `camera-usb.bat` và dashboard có thể mở cổng USB của DevKit để lấy từng ảnh bằng lệnh `FRAME`. Camera trả `FRAME_BEGIN:<số byte JPEG>`, các dòng `FRAME_DATA:<base64>`, rồi `FRAME_END`. DevKit chuyển các dòng này về ứng dụng đang mở COM. Khi đang nhận diện hoặc đăng ký, ảnh xem trước lấy từ khung camera vừa thu cho lượt đó. Camera tạo bản 160 × 120 và gửi bằng tác vụ UART riêng. Lệnh USB `CHECKIN` dùng cùng luồng yêu cầu nhận diện với nút vật lý.
 
 ## Trang cài đặt trên ESP32-CAM
 
@@ -45,7 +49,7 @@ Camera mặc định chạy **Wi-Fi STA**, kết nối hotspot laptop hoặc rou
 | POST `/api/test` | Thử nhận diện cục bộ; không gửi kết quả điểm danh qua UART |
 | POST `/api/rotate` | Xoay ảnh 180°, lưu hướng vào NVS |
 | POST `/api/restart`, `/api/clear` | Khởi động lại / xóa toàn bộ khuôn mặt rồi khởi động lại |
-| POST `/api/radio/off` | Tắt Wi-Fi, giữ UART; reboot để bật lại |
+| POST `/api/radio/off` | Tắt Wi-Fi, giữ UART. Gửi `WIFI_ON` qua Serial hoặc khởi động lại để bật lại. |
 
 POST cần `X-Camera-Control: local`, kiểm tra cùng origin nếu có header Origin. HTTP 202 chỉ xác nhận đã xếp lệnh; xem `/api/status` để biết kết quả thực thi. Đây là giao diện cài đặt trên mạng cục bộ, không có tài khoản người dùng. Không chuyển tiếp cổng camera ra Internet.
 

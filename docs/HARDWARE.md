@@ -207,7 +207,7 @@ Sau khi căn xong, bấm **Dừng xem** hoặc đóng trang. Sau tối đa kho�
 
 Nếu danh sách **Devices connected** của Windows lúc có lúc mất, mở chẩn đoán camera trên web hoặc Serial: **uptime quay về thấp / lặp dòng BOOT** là board đã khởi động lại (xem reset reason, nguồn hoặc lỗi chương trình); **uptime tiếp tục tăng nhưng số lần ngắt Wi-Fi tăng** là kết nối mạng bị ngắt. `brownout` cho biết chip ghi nhận sụt áp, còn mất điện hoàn toàn có thể chỉ báo `power_on`. Chỉ danh sách Windows chưa đủ để xác định nguyên nhân.
 
-Để demo không có Wi-Fi trên camera, chọn **Thông tin và công cụ → Tắt Wi-Fi camera**. Trang sẽ mất kết nối; nút UART vẫn hoạt động. Nhấn Reset trên mạch để kết nối lại hotspot. Có thể đặt `CAM_SETUP_WIFI_ENABLED=false` trong `camera_config.h` rồi nạp nếu muốn tắt Wi-Fi ngay từ lúc khởi động.
+Camera tự thử kết nối lại khi bật hotspot. Để tắt hẳn radio camera trong demo offline, chọn **Thông tin và công cụ → Tắt Wi-Fi camera** hoặc gửi `WIFI_OFF` qua Serial. UART vẫn hoạt động. Khi muốn dùng web lại, bật hotspot 2,4 GHz rồi gửi `WIFI_ON` hoặc nhấn RST trên ESP32-CAM. Giữ `CAM_SETUP_WIFI_ENABLED=true` trong `camera_config.h` để dùng cả hai chế độ.
 
 ### USB Serial tùy chọn để chẩn đoán
 
@@ -219,6 +219,8 @@ Khi cấp USB từ laptop, mở Serial Monitor **115200 baud**, **New Line**. C�
 | `ENROLL` | Đăng ký một người, tương đương nút trên trang camera |
 | `TEST` | Thử nhận diện cục bộ; log `LOCAL TEST status=recognized face_id=0 \| inference=ESP32-CAM` |
 | `WIFI_OFF` | Tắt Wi-Fi, giữ UART và nhận diện cục bộ |
+| `WIFI_ON` | Bật Wi-Fi và kết nối lại hotspot đã cấu hình |
+| `WIFI_STATUS` | Xem trạng thái Wi-Fi hoặc địa chỉ để mở trang camera |
 | `RESTART` | Khởi động lại, giữ dữ liệu đã lưu |
 | `CLEAR_FACES` | Xóa toàn bộ khuôn mặt rồi khởi động lại |
 
@@ -233,7 +235,20 @@ Khi nạp lại, giữ **Erase All Flash Before Sketch Upload = Disabled** để
 3. Cho một người nhìn thẳng vào camera và gửi `ENROLL` một lần. Theo dõi `ENROLL Sample=…/5`. Khi hoàn tất, DevKit báo `ENROLL SAVED | Face ID=… | saved on ESP32-CAM`. Mẫu nằm trong flash của camera. Nếu báo `ENROLL DUPLICATE`, ghi lại Face ID đã có.
 4. Khi muốn đưa người này vào danh sách, mở dashboard → **Liên kết Face ID có sẵn**, nhập họ tên, MSSV, camera `CAM01` và Face ID ghi được.
 
-Nếu chỉ có `ENROLL request sent` rồi báo `ENROLL timeout: no reply`, kiểm tra nguồn camera, hai dây UART và firmware của cả hai bo. Lượt đăng ký đang chạy sẽ chặn nút điểm danh cho đến khi có kết quả.
+Nếu báo `ENROLL: camera UART offline`, chờ `CAMERA UART: connected` trước khi thử lại. Nếu đã gửi lệnh nhưng không có xác nhận trong khoảng 8 giây, DevKit nhả lượt và báo `ENROLL timeout: no reply`. Kiểm tra nguồn camera, hai dây UART và GND chung. Lượt đăng ký đang chạy sẽ chặn nút điểm danh cho đến khi có kết quả hoặc hết thời gian.
+
+Serial Monitor của DevKit cũng nhận `WIFI_ON`, `WIFI_OFF` và `WIFI_STATUS` để điều khiển Wi-Fi camera qua UART. Sau khi camera nhận IP, DevKit in `CAM WIFI: CAMERA URL: http://…/`. Dùng địa chỉ đó để mở trang camera hoặc nhập vào ô **Camera điểm danh** trên dashboard.
+
+### Xem ảnh và căn mặt qua USB DevKit
+
+**Mở bằng cửa sổ riêng trên Windows.** Cấp nguồn ESP32-CAM, nối UART/GND với DevKit và cắm DevKit vào laptop. Đóng Arduino Serial Monitor, nhấp đúp `camera-usb.bat`, chọn COM của DevKit rồi bấm **Kết nối**. Có thể bấm nút vật lý hoặc **Điểm danh** trong cửa sổ. Nút **Đăng ký mặt** thu 5 mẫu vào flash của camera. Hướng dẫn và kết quả hiện cạnh ảnh. Chế độ này chạy khi hotspot và backend đều tắt. Ảnh USB là khung JPEG 160 × 120 để căn mặt. Khi xoay, giữ nhẹ theo hướng yêu cầu và nhìn thẳng lại khi hiện bước `3/3`.
+
+**Mở qua dashboard.** Dùng các bước dưới đây nếu bạn muốn xem ảnh bên cạnh bảng điểm danh.
+
+1. Nạp firmware hỗ trợ xem ảnh USB cho cả hai bo. Giữ ESP32-CAM dùng nguồn ngoài, nối ba dây UART/GND và cắm DevKit vào laptop.
+2. Đóng Serial Monitor của Arduino. Mở dashboard `http://127.0.0.1:5000/` bằng Chrome hoặc Edge. Mở mục **Xem camera qua USB DevKit**, bấm **Kết nối USB** và chọn COM của DevKit. Hotspot có thể tắt.
+3. Dùng khung nét đứt để căn mặt. Bấm nút vật lý DevKit hoặc chọn **Điểm danh qua DevKit** trên trang. Theo dõi hướng dẫn xoay mặt và kết quả ngay bên cạnh ảnh. Có thể chọn **Đăng ký mặt offline** để thu 5 mẫu trên ESP32-CAM, rồi liên kết Face ID trên web sau.
+4. Bấm **Ngắt USB** trước khi mở lại Serial Monitor. Ảnh truyền dưới dạng các khung JPEG cách quãng và hiển thị trên trình duyệt. Luồng ghi điểm danh lên bảng vẫn dùng đường truyền backend đã cấu hình.
 
 ## 2. ESP32-DevKit
 
@@ -319,7 +334,7 @@ CAMERA ACK: capture requested
 CAMERA: recognized Face ID=0
 ```
 
-Nếu timeout sau 90 giây, kiểm tra TX/RX đấu chéo, chung GND và camera đã khởi động. Chưa nối mạng/backend thì chưa có bản ghi trên web; log này mới xác nhận phần nhận diện cục bộ.
+DevKit chỉ gửi yêu cầu sau khi UART đã kết nối. Nếu mất phản hồi trước khi camera xác nhận, lượt hết hạn sau khoảng 8 giây. Nếu camera đã xác nhận, thời hạn nhận kết quả là 90 giây tính từ lúc gửi. Kiểm tra TX/RX đấu chéo, GND chung và nguồn của camera nếu kết nối bị mất. Khi chạy offline, xem kết quả nhận diện trên Serial và kiểm tra bảng điểm danh sau khi kết nối lại.
 
 ESP32 trung tâm chống dội nút, gửi request ID duy nhất qua UART. Camera chụp ảnh mới, chỉ chấp nhận đúng một khuôn mặt, nhận diện trên chip rồi trả status và Face ID. DevKit chỉ nhận phản hồi khớp request đang chờ và mở servo khi nhận diện thành công. Ở cấu hình mặc định, backend nhận bản ghi qua HTTP từ camera. Khi DevKit đã cấu hình MQTT, bản ghi từ nút DevKit đi qua MQTT.
 
